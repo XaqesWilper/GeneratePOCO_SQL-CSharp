@@ -1,0 +1,191 @@
+
+/* USAGE: 
+ Run this query against the database
+ The script will loop through tables, views and generate all entities.
+*/
+
+DECLARE @CONFIG_SHOULD_CONVERT_TO_SINGULAR_TABLE_NAME BIT = 1;
+
+DECLARE @tableName varchar(200)
+DECLARE @columnName varchar(200)
+DECLARE @nullable varchar(50)
+DECLARE @datatype varchar(50)
+DECLARE @maxlen int
+DECLARE @sType varchar(50)
+DECLARE @propertyType varchar(100)
+DECLARE @sProperty varchar(200)
+ 
+DECLARE @TableNameSingular varchar(200);
+
+DECLARE table_cursor CURSOR FOR
+SELECT
+  TABLE_NAME
+FROM [INFORMATION_SCHEMA].[TABLES]
+
+OPEN table_cursor
+
+FETCH NEXT FROM table_cursor
+INTO @tableName
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+
+
+
+	/***** Singularize ****/
+ 
+	IF @tableName NOT LIKE '%s'
+	-- already singular
+	BEGIN
+		SET @TableNameSingular = @tableName
+	END
+
+	ELSE IF @tableName LIKE '%ss'
+	-- already singular ie. mass, chess
+	BEGIN
+		SET @TableNameSingular = @tableName
+	END
+
+	ELSE IF @tableName LIKE '%ies' 
+	-- ie. cherries, ladies
+	BEGIN
+		SET @TableNameSingular = SUBSTRING(@tableName, 1, LEN(@tableName)-3) + 'y'
+	END
+
+	ELSE IF @tableName LIKE '%oes' 
+	-- ie. heroes, potatoes
+	BEGIN
+		SET @TableNameSingular = SUBSTRING(@tableName, 1, LEN(@tableName) -2)
+	END
+
+	ELSE IF @tableName LIKE '%es' and SUBSTRING(@tableName, LEN(@tableName)-2, 1) in ('a', 'e', 'i', 'o', 'u')
+	-- ie. massages, phases
+	BEGIN
+		SET @TableNameSingular = SUBSTRING(@tableName, 1, LEN(@tableName) -1)
+	END
+
+	ELSE IF @tableName LIKE '%es' and SUBSTRING(@tableName, LEN(@tableName) -2, 1) in ('h')
+	-- ie. witches, dishes
+	BEGIN
+		SET @TableNameSingular = SUBSTRING(@tableName, 1, LEN(@tableName) - 2)
+	END
+
+	ELSE IF @tableName LIKE '%es' and SUBSTRING(@tableName, LEN(@tableName) -2, 1) in ('b','c','d','f','g','j','k','l','m','n','p','q','r','s','t','v','w','x','y','z')
+	-- ie. kisses, judges
+	BEGIN
+		SET @TableNameSingular = SUBSTRING(@tableName, 1, LEN(@tableName) - 1)
+	END
+
+	ELSE IF @tableName LIKE '%s'
+	-- ie. laps, clocks, boys
+	BEGIN
+		SET @TableNameSingular = SUBSTRING(@tableName, 1, LEN(@tableName) -1)
+	END
+
+	/***** Singularize ****/
+
+  IF (@CONFIG_SHOULD_CONVERT_TO_SINGULAR_TABLE_NAME = 1)
+  BEGIN
+    PRINT 'public class ' + @TableNameSingular + ' {'
+  END	 
+  ELSE
+  BEGIN
+    PRINT 'public class ' + @tableName + ' {'
+  END	 
+
+
+  DECLARE column_cursor CURSOR FOR
+  SELECT
+    COLUMN_NAME,
+    IS_NULLABLE,
+    DATA_TYPE,
+    ISNULL(CHARACTER_MAXIMUM_LENGTH, '-1')
+  FROM [INFORMATION_SCHEMA].[COLUMNS]
+  WHERE [TABLE_NAME] = @tableName
+  ORDER BY [ORDINAL_POSITION]
+
+  OPEN column_cursor
+  FETCH NEXT FROM column_cursor INTO @columnName, @nullable, @datatype, @maxlen
+
+  WHILE @@FETCH_STATUS = 0
+  /*BEGIN-LOOP*/
+
+  BEGIN
+
+    SELECT
+      @sType =
+              CASE @datatype
+                WHEN 'int' THEN 'int'
+                WHEN 'decimal' THEN 'decimal'
+                WHEN 'money' THEN 'decimal'
+                WHEN 'char' THEN 'string'
+                WHEN 'nchar' THEN 'string'
+                WHEN 'varchar' THEN 'string'
+                WHEN 'nvarchar' THEN 'string'
+                WHEN 'uniqueidentifier' THEN 'Guid'
+                WHEN 'datetime' THEN 'DateTime'
+                WHEN 'smalldatetime' THEN 'DateTime'
+                WHEN 'bit' THEN 'bool'
+				WHEN 'real' THEN 'float'
+				WHEN 'float' THEN 'double'
+				WHEN 'numeric' THEN 'decimal'
+				WHEN 'smallmoney' THEN 'decimal'
+				WHEN 'bigint' THEN 'long'
+				WHEN 'smallint' THEN 'short'
+				WHEN 'tinyint' THEN 'byte'
+				WHEN 'rowversion' THEN 'byte[]'
+				WHEN 'sql_variant' THEN 'object'
+				WHEN 'ntext' THEN 'string'
+				WHEN 'text' THEN 'string'
+				WHEN 'nchar' THEN 'string'
+				WHEN 'varbinary' THEN 'byte[]'
+				WHEN 'binary' THEN 'byte[]'
+				WHEN 'image' THEN 'byte[]'
+                ELSE 'string'
+              END
+
+    IF (@nullable = 'NO')
+    BEGIN
+      PRINT char(9) + '[Required]'
+      SET @propertyType = @sType;
+    END
+    ELSE
+    BEGIN
+      IF (@sType = 'string')
+      BEGIN
+        SET @propertyType = @sType;
+      END
+      ELSE
+      BEGIN
+        SET @propertyType = @sType + '?';
+      END
+    END
+
+
+    IF (@sType = 'String'
+      AND @maxLen <> '-1')
+    BEGIN
+      PRINT char(9) + '[MaxLength(' + CONVERT(varchar(4), @maxLen) + ')]'
+    END
+
+	 
+
+    SET @sProperty = char(9) + 'public ' + @propertyType + ' ' + @columnName + ' { get; set; }'
+    PRINT @sProperty
+
+    PRINT ''
+    FETCH NEXT FROM column_cursor INTO @columnName, @nullable, @datatype, @maxlen
+  END
+
+  /*END-LOOP*/
+  CLOSE column_cursor
+  DEALLOCATE column_cursor
+
+  PRINT '}'
+  PRINT ''
+  FETCH NEXT FROM table_cursor
+  INTO @tableName
+
+END
+CLOSE table_cursor
+DEALLOCATE table_cursor
